@@ -8,7 +8,6 @@ XServer GAME 自动登录和续期脚本
 #                          导入依赖
 # =====================================================================
 import socket
-import urllib.parse
 import subprocess
 
 import asyncio
@@ -21,6 +20,10 @@ import json
 import requests
 from playwright.async_api import async_playwright, Playwright, Browser, BrowserContext, Page
 from playwright_stealth import stealth_async
+from urllib.parse import urlparse, unquote
+
+
+
 
 # =====================================================================
 #                          配置区域
@@ -49,7 +52,50 @@ TARGET_URL = "https://secure.xserver.ne.jp/xapanel/login/xmgame"
 # Telegram配置 - 可选，不填则不推送
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or ""
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or ""
+# =====================================================================
+#               代理解析模块
+# =====================================================================
+def parse_proxy_server(proxy_server: str):
+    """
+    输入示例：
+      socks5://user:pass@1.2.3.4:1080
+      socks5h://user:%40p%3Ass@host:1080
+      http://user:pass@host:8080
+      socks5://[2400:8a20:112:1::b6]:31017
+      socks5://user:pass@[2400:8a20:112:1::b6]:31017
+      host:1080   （无协议时外层可先补 socks5://）
+    输出：
+      (server, username, password)
+      server 形如 "socks5://host:port" 或 "http://host:port"
+    """
+    if not proxy_server:
+        return None, None, None
 
+    s = proxy_server.strip()
+
+    # 如果没写 scheme，按你现有逻辑默认 socks5
+    if "://" not in s:
+        s = "socks5://" + s
+
+    u = urlparse(s)
+
+    scheme = u.scheme or "socks5"
+    host = u.hostname
+    port = u.port
+
+    if not host or not port:
+        raise ValueError(f"Bad PROXY_SERVER: {proxy_server}")
+
+    # IPv6 需要加 []
+    host_part = f"[{host}]" if ":" in host and not host.startswith("[") else host
+
+    server = f"{scheme}://{host_part}:{port}"
+
+    # urlparse 会把 %xx 保留在 username/password 里，需要 unquote
+    username = unquote(u.username) if u.username else None
+    password = unquote(u.password) if u.password else None
+
+    return server, username, password
 # =====================================================================
 #                        Telegram 推送模块
 # =====================================================================
@@ -188,7 +234,7 @@ class XServerAutoLogin:
             if "://" not in u:
                 u = "socks5://" + u
 
-            p = urllib.parse.urlparse(u)
+            p = urlparse(u)
             host, port = p.hostname, p.port
 
             if not host or not port:
@@ -232,7 +278,12 @@ class XServerAutoLogin:
             # 如果启用代理，添加代理参数
             effective_proxy = self._get_effective_proxy(PROXY_SERVER)
             if effective_proxy:
-                launch_options["proxy"] = {"server": effective_proxy}
+                server, username, password = parse_proxy_server(effective_proxy)
+                launch_options["proxy"] = {"server": server}
+                if username:
+                    launch_options["proxy"]["username"] = username
+                if password:
+                    launch_options["proxy"]["password"] = password
             
             # 启动浏览器
             self.browser = await playwright.chromium.launch(**launch_options)

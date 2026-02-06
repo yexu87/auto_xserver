@@ -30,17 +30,17 @@ WAIT_TIMEOUT = 10000     # 页面元素等待超时时间(毫秒)
 PAGE_LOAD_DELAY = 3      # 页面加载延迟时间(秒)
 
 # 代理配置 - 可选，不填则不使用代理
-PROXY_SERVER = os.getenv("PROXY_SERVER") or "填你socks5"
+PROXY_SERVER = os.getenv("PROXY_SERVER") or ""
 USE_PROXY = bool(PROXY_SERVER)  # 如果有代理地址则启用
 
 # XServer登录配置 - 可以直接填写或使用环境变量
-LOGIN_EMAIL = os.getenv("XSERVER_EMAIL") or "填你邮箱"
-LOGIN_PASSWORD = os.getenv("XSERVER_PASSWORD") or "填你密码"
+LOGIN_EMAIL = os.getenv("XSERVER_EMAIL") or ""
+LOGIN_PASSWORD = os.getenv("XSERVER_PASSWORD") or ""
 TARGET_URL = "https://secure.xserver.ne.jp/xapanel/login/xmgame"
 
 # Telegram配置 - 可选，不填则不推送
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or "填你TG机器人token"
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or "填你TG ID"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or ""
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or ""
 
 # =====================================================================
 #                        Telegram 推送模块

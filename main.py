@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-XServer GAME 多账号自动登录脚本 (Matrix 分身版 + 剩余时间显示)
+XServer GAME 多账号自动登录脚本 (Matrix 分身版 + 精确时间显示)
 """
 
 import asyncio
@@ -40,14 +40,10 @@ if not os.path.exists(SCREENSHOT_DIR):
 # =====================================================================
 
 def parse_accounts():
-    """
-    解析环境变量 XSERVER_BATCH
-    """
     accounts = []
     raw_data = os.getenv("XSERVER_BATCH")
     
     if not raw_data:
-        # 兼容旧单账号
         sid = os.getenv("XSERVER_LOGIN_ID")
         spw = os.getenv("XSERVER_PASSWORD")
         sip = os.getenv("XSERVER_IP")
@@ -58,7 +54,6 @@ def parse_accounts():
             })
         return accounts
 
-    # 批量解析
     for line in raw_data.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
@@ -88,51 +83,15 @@ class TelegramNotifier:
         self.chat_id = chat_id
         self.enabled = bool(token and chat_id)
 
-    def calculate_remaining(self, expiry_date_str):
-        """
-        计算剩余时间
-        输入格式: YYYY-MM-DD
-        返回: "X天 Y小时"
-        """
-        if not expiry_date_str:
-            return "未知"
-            
-        try:
-            # XServer 的到期时间通常是当天的 23:59:59 或者 00:00:00
-            # 这里假设是日本时间 (JST, UTC+9) 的当天结束
-            # 为了简化，我们按北京时间对比
-            
-            # 解析日期字符串
-            expiry_date = datetime.datetime.strptime(expiry_date_str, "%Y-%m-%d").date()
-            
-            # 获取当前日期 (UTC+9 日本时间，因为服务器在日本)
-            jst_now = datetime.datetime.now(timezone(timedelta(hours=9)))
-            today = jst_now.date()
-            
-            delta = expiry_date - today
-            days = delta.days
-            
-            # 如果是当天到期
-            if days < 0:
-                return "已过期"
-            elif days == 0:
-                return "今天到期 (紧急)"
-            else:
-                return f"{days} 天"
-                
-        except Exception as e:
-            print(f"⚠️ 日期计算错误: {e}")
-            return "计算错误"
-
-    def send_result(self, login_id, ip, status, old_time, new_time):
+    def send_result(self, login_id, ip, status, old_time, new_time, exact_left=""):
         if not self.enabled: return
         
         beijing_time = datetime.datetime.now(timezone(timedelta(hours=8)))
         timestamp = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
         safe_id = login_id[:2] + "***" + login_id[-2:] if len(login_id) > 4 else login_id
 
-        # 计算剩余天数 (基于 old_time)
-        remaining_str = self.calculate_remaining(old_time)
+        # 构造剩余时间显示
+        remaining_display = exact_left if exact_left else "未知"
 
         msg = f"<b>🎮 XServer 续期通知</b>\n"
         msg += f"🆔 账号: <code>{safe_id}</code>\n"
@@ -146,7 +105,8 @@ class TelegramNotifier:
         elif status == "Unexpired":
             msg += f"ℹ️ <b>无需续期</b>\n"
             msg += f"📅 到期: {old_time}\n"
-            msg += f"⏳ 剩余: <b>{remaining_str}</b>\n"
+            # 这里显示抓取到的精确时间 (例如: 78時間49分)
+            msg += f"⏳ 剩余: <b>{remaining_display}</b>\n"
             msg += f"💡 提示: 剩余 > 24小时\n"
         elif status == "Failed":
             msg += f"❌ <b>执行失败</b>\n"
@@ -174,6 +134,8 @@ class XServerBot:
         self.page = None
         self.old_expiry = None
         self.new_expiry = None
+        # 新增变量：存储网页抓取的精确剩余时间
+        self.exact_remaining = "" 
         self.status = "Unknown"
         self.screenshot_idx = 0
 
@@ -206,7 +168,6 @@ class XServerBot:
             await self.page.goto(TARGET_URL, wait_until='load', timeout=60000)
             await self.page.wait_for_selector("input[type='password']", timeout=WAIT_TIMEOUT)
             
-            # 填写表单
             inputs = await self.page.locator("input:not([type='hidden']):not([type='submit'])").all()
             if len(inputs) >= 3:
                 await inputs[0].fill(self.login_id)
@@ -233,7 +194,14 @@ class XServerBot:
             print(f"❌ [{self.login_id}] 异常: {e}")
             self.status = "Failed"
         finally:
-            self.notifier.send_result(self.login_id, self.login_ip, self.status, self.old_expiry, self.new_expiry)
+            self.notifier.send_result(
+                self.login_id, 
+                self.login_ip, 
+                self.status, 
+                self.old_expiry, 
+                self.new_expiry,
+                self.exact_remaining # 传递精确时间
+            )
             await self.close()
 
     async def check_and_renew(self):
@@ -242,8 +210,19 @@ class XServerBot:
             for el in elements:
                 txt = await el.text_content()
                 if "残り" in txt:
+                    # 1. 抓取精确剩余时间 (例如: 残り78時間49分)
+                    # 正则匹配 "残り" 后面的一串时间字符
+                    rem_match = re.search(r'(残り\s*\d+時間\d+分)', txt)
+                    if rem_match:
+                        # 去掉 "残り" 前缀和空格，只保留 "78時間49分"
+                        raw_time = rem_match.group(1).replace("残り", "").strip()
+                        self.exact_remaining = raw_time
+                        print(f"⏳ 精确剩余: {self.exact_remaining}")
+
+                    # 2. 抓取到期日期 (YYYY-MM-DD)
                     match = re.search(r'\((\d{4}-\d{2}-\d{2})まで\)', txt)
-                    if match: self.old_expiry = match.group(1)
+                    if match: 
+                        self.old_expiry = match.group(1)
                     break
             
             renew_btn = self.page.locator("a:has-text('アップグレード・期限延長')")
@@ -286,12 +265,12 @@ class XServerBot:
             self.status = "Failed"
 
 # =====================================================================
-#                        主程序入口 (Matrix 修改版)
+#                        主程序入口
 # =====================================================================
 
 async def main():
     print("=" * 60)
-    print("XServer 独立 IP 分身版")
+    print("XServer 独立 IP 分身版 (精确时间显示)")
     print("=" * 60)
 
     accounts = parse_accounts()
@@ -299,31 +278,27 @@ async def main():
         print("❌ 未找到账号配置 XSERVER_BATCH")
         exit(1)
 
-    # 👇👇👇 核心逻辑：检查是否指定了运行索引 👇👇👇
     target_index_str = os.getenv("TARGET_INDEX")
     
     if target_index_str is not None:
         try:
             idx = int(target_index_str)
             if 0 <= idx < len(accounts):
-                # 🎯 矩阵模式：只运行指定的这一个账号
                 print(f"🎯 [Matrix Mode] 本次任务只运行第 {idx + 1} 个账号")
                 acc = accounts[idx]
                 bot = XServerBot(acc)
                 await bot.run_task()
             else:
-                print(f"⚠️ 索引 {idx} 超出范围 (总账号数: {len(accounts)})，本任务跳过。")
+                print(f"⚠️ 索引 {idx} 超出范围 (总账号数: {len(accounts)})，跳过。")
         except ValueError:
             print("❌ TARGET_INDEX 格式错误")
     else:
-        # 🔄 兼容模式：如果没有指定索引，就像以前一样循环跑所有
-        print("⚠️ 未指定 TARGET_INDEX，进入循环模式 (IP可能相同)")
+        print("⚠️ 未指定 TARGET_INDEX，进入循环模式")
         for i, acc in enumerate(accounts):
             bot = XServerBot(acc)
             await bot.run_task()
             if i < len(accounts) - 1:
                 delay = random.randint(1, 100)
-                print(f"\n⏳ 等待 {delay} 秒...\n")
                 await asyncio.sleep(delay)
 
 if __name__ == "__main__":

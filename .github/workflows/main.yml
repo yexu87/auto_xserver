@@ -3,7 +3,7 @@ name: 🪄 XServer自动签到
 on:
   schedule:
     -  cron: "08 08 * * *"
-    -  cron: "11 15 * * *" # 每天 UTC 01:30 和 16:55（北京时间分别是 09:30 和 次日 00:55，因为我自己的时间是16:50分之后可以续期，我给了5分钟的预留，这里为什么要2个时间点呢，因为怕一次时间点由于github的定时任务延迟会错过续期时间，也就是16:50这个时间段如果错过后，9个小时后执行第二次定时。一般就不会错过了）
+    -  cron: "11 15 * * *" # 你的自定义时间配置
   workflow_dispatch:
 
 jobs:
@@ -42,12 +42,21 @@ jobs:
 
       - name: 运行脚本
         env:
-          XSERVER_EMAIL: ${{ secrets.XSERVER_EMAIL }}
-          XSERVER_PASSWORD: ${{ secrets.XSERVER_PASSWORD }}
+          # ✅ 核心修改：这里传入多账号变量 XSERVER_BATCH
+          XSERVER_BATCH: ${{ secrets.XSERVER_BATCH }}
+          
+          # 👇 全局默认通知配置 (如果 XSERVER_BATCH 里某行没填 Token，就会用这里的)
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          
+          # 👇 代理配置
           PROXY_SERVER: ${{ secrets.PROXY_SERVER }}
-        run: python renew.py
+          
+          # 👇 强制开启无头模式 (服务器环境必备)
+          USE_HEADLESS: "true"
+          
+        # ⚠️ 注意：如果你把 Python 代码保存为 renew.py，请将下方 main.py 改为 renew.py
+        run: python main.py
 
       # ⏱️ 提交 time.txt 到仓库(用于解决60天无文件变化的限制)
       - name: Commit time.txt to repo

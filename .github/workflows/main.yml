@@ -1,14 +1,23 @@
-name: 🪄 XServer自动签到
+name: 🪄 XServer自动签到 (多IP并行版)
 
 on:
   schedule:
     -  cron: "08 08 * * *"
-    -  cron: "11 15 * * *" # 你的自定义时间配置
+    -  cron: "11 15 * * *"
   workflow_dispatch:
 
 jobs:
   run:
     runs-on: ubuntu-latest
+
+    # 👇👇👇 【核心修改 1】配置矩阵策略 👇👇👇
+    strategy:
+      fail-fast: false  # 如果一个账号失败，不要取消其他账号的任务
+      matrix:
+        # ⚠️ 请根据你的账号数量修改这里！索引从 0 开始。
+        # 如果你有 2 个账号，写 [0, 1]
+        # 如果你有 3 个账号，写 [0, 1, 2]
+        account_index: [0, 1]
 
     steps:
       - name: 检出仓库
@@ -34,49 +43,54 @@ jobs:
           pip install -r requirements.txt
           python -m playwright install chromium
 
-      - name: 🎲 定时任务基础上随机延迟（0-119秒）
+      - name: 🎲 随机延迟 (避免完全并发)
         run: |
-          delay=$((RANDOM % 120))
+          # 虽然IP不同了，稍微错开几秒还是好的
+          delay=$((RANDOM % 60))
           echo "Random delay: ${delay}s"
           sleep $delay
 
       - name: 运行脚本
         env:
-          # ✅ 核心修改：这里传入多账号变量 XSERVER_BATCH
+          # 传入所有账号配置
           XSERVER_BATCH: ${{ secrets.XSERVER_BATCH }}
-          
-          # 👇 全局默认通知配置 (如果 XSERVER_BATCH 里某行没填 Token，就会用这里的)
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          
-          # 👇 代理配置
           PROXY_SERVER: ${{ secrets.PROXY_SERVER }}
-          
-          # 👇 强制开启无头模式 (服务器环境必备)
           USE_HEADLESS: "true"
           
-        # ⚠️ 注意：如果你把 Python 代码保存为 renew.py，请将下方 main.py 改为 renew.py
+          # 👇👇👇 【核心修改 2】把当前任务的编号传给 Python 👇👇👇
+          # 这样 Python 脚本就知道："我是分身0，我只跑第1个账号"
+          TARGET_INDEX: ${{ matrix.account_index }}
+          
+        # ⚠️ 确保你的 Python 文件名是 main.py (对应上一条回复的代码)
         run: python main.py
 
-      # ⏱️ 提交 time.txt 到仓库(用于解决60天无文件变化的限制)
+      # 👇👇👇 【核心修改 3】防止 Git 提交冲突 👇👇👇
+      # 因为有多个任务并行运行，如果它们同时提交代码会报错。
+      # 我们限制只有第一个账号 (索引0) 负责更新 time.txt
       - name: Commit time.txt to repo
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ "${{ matrix.account_index }}" == "0" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          if [ ! -f time.txt ]; then
-            echo "首次生成时间：$(date +'%Y-%m-%d %H:%M:%S')" > time.txt
+            if [ ! -f time.txt ]; then
+              echo "首次生成时间：$(date +'%Y-%m-%d %H:%M:%S')" > time.txt
+            else
+              echo "$(date +'%Y-%m-%d %H:%M:%S')" > time.txt
+            fi
+
+            git add time.txt
+
+            if git diff --cached --quiet; then
+              echo "无变化，无需提交"
+            else
+              git commit -m "⏱️ 更新时间文件: $(date +'%Y-%m-%d %H:%M:%S')"
+              git push origin HEAD:main
+            fi
           else
-            echo "$(date +'%Y-%m-%d %H:%M:%S')" > time.txt
-          fi
-
-          git add time.txt
-
-          if git diff --cached --quiet; then
-            echo "无变化，无需提交"
-          else
-            git commit -m "⏱️ 更新时间文件: $(date +'%Y-%m-%d %H:%M:%S')"
-            git push origin HEAD:main
+            echo "当前是分身任务 ${{ matrix.account_index }}，跳过提交步骤，防止冲突。"
           fi

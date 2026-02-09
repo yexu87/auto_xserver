@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-XServer GAME 多账号自动登录脚本 (Matrix 分身版)
+XServer GAME 多账号自动登录脚本 (Matrix 分身版 + 剩余时间显示)
 """
 
 import asyncio
@@ -42,7 +42,6 @@ if not os.path.exists(SCREENSHOT_DIR):
 def parse_accounts():
     """
     解析环境变量 XSERVER_BATCH
-    格式: LoginID,Password,IP,Token(选填),ChatID(选填)
     """
     accounts = []
     raw_data = os.getenv("XSERVER_BATCH")
@@ -89,6 +88,42 @@ class TelegramNotifier:
         self.chat_id = chat_id
         self.enabled = bool(token and chat_id)
 
+    def calculate_remaining(self, expiry_date_str):
+        """
+        计算剩余时间
+        输入格式: YYYY-MM-DD
+        返回: "X天 Y小时"
+        """
+        if not expiry_date_str:
+            return "未知"
+            
+        try:
+            # XServer 的到期时间通常是当天的 23:59:59 或者 00:00:00
+            # 这里假设是日本时间 (JST, UTC+9) 的当天结束
+            # 为了简化，我们按北京时间对比
+            
+            # 解析日期字符串
+            expiry_date = datetime.datetime.strptime(expiry_date_str, "%Y-%m-%d").date()
+            
+            # 获取当前日期 (UTC+9 日本时间，因为服务器在日本)
+            jst_now = datetime.datetime.now(timezone(timedelta(hours=9)))
+            today = jst_now.date()
+            
+            delta = expiry_date - today
+            days = delta.days
+            
+            # 如果是当天到期
+            if days < 0:
+                return "已过期"
+            elif days == 0:
+                return "今天到期 (紧急)"
+            else:
+                return f"{days} 天"
+                
+        except Exception as e:
+            print(f"⚠️ 日期计算错误: {e}")
+            return "计算错误"
+
     def send_result(self, login_id, ip, status, old_time, new_time):
         if not self.enabled: return
         
@@ -96,17 +131,26 @@ class TelegramNotifier:
         timestamp = beijing_time.strftime("%Y-%m-%d %H:%M:%S")
         safe_id = login_id[:2] + "***" + login_id[-2:] if len(login_id) > 4 else login_id
 
-        msg = f"<b>🎮 XServer 独立运行通知</b>\n"
+        # 计算剩余天数 (基于 old_time)
+        remaining_str = self.calculate_remaining(old_time)
+
+        msg = f"<b>🎮 XServer 续期通知</b>\n"
         msg += f"🆔 账号: <code>{safe_id}</code>\n"
-        msg += f"🖥 验证IP: <code>{ip}</code>\n"
+        msg += f"🖥 IP: <code>{ip}</code>\n"
         msg += f"⏰ 时间: {timestamp}\n\n"
         
         if status == "Success":
-            msg += f"✅ <b>续期成功</b>\n📅 旧: {old_time}\n📅 新: {new_time}"
+            msg += f"✅ <b>续期成功</b>\n"
+            msg += f"📅 旧: {old_time}\n"
+            msg += f"📅 新: {new_time}\n"
         elif status == "Unexpired":
-            msg += f"ℹ️ <b>无需续期</b>\n📅 到期: {old_time}\n💡 剩余 > 24小时"
+            msg += f"ℹ️ <b>无需续期</b>\n"
+            msg += f"📅 到期: {old_time}\n"
+            msg += f"⏳ 剩余: <b>{remaining_str}</b>\n"
+            msg += f"💡 提示: 剩余 > 24小时\n"
         elif status == "Failed":
-            msg += f"❌ <b>执行失败</b>\n📅 到期: {old_time or '未知'}"
+            msg += f"❌ <b>执行失败</b>\n"
+            msg += f"📅 到期: {old_time or '未知'}\n"
         
         try:
             url = f"https://api.telegram.org/bot{self.token}/sendMessage"

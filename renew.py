@@ -2,6 +2,17 @@
 # -*- coding: utf-8 -*-
 """
 XServer GAME 多账号自动登录和续期脚本
+填写示例 (XSERVER_BATCH)：
+
+Plaintext
+# 账号1：使用全局默认TG通知
+xm123456,mypassword1,210.131.111.222
+
+# 账号2：使用该账号专属的TG通知
+xm987654,mypassword2,210.131.333.444,123456:AbcDefToken,987654321
+
+# 账号3：不发通知（如果全局也没配的话）
+xm555666,mypassword3,111.222.33.44
 """
 
 import asyncio

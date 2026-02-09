@@ -2,7 +2,9 @@ name: 🪄 XServer自动签到 (多IP并行版)
 
 on:
   schedule:
-    -  cron: "08 08 * * *"
+    # 对应北京时间 06:06 (UTC 22:06)
+    -  cron: "06 22 * * *"
+    # 对应北京时间 23:11 (UTC 15:11)
     -  cron: "11 15 * * *"
   workflow_dispatch:
 
@@ -10,13 +12,12 @@ jobs:
   run:
     runs-on: ubuntu-latest
 
-    # 👇👇👇 【核心修改 1】配置矩阵策略 👇👇👇
+    # 矩阵策略 (保持不变)
     strategy:
-      fail-fast: false  # 如果一个账号失败，不要取消其他账号的任务
+      fail-fast: false
       matrix:
         # ⚠️ 请根据你的账号数量修改这里！索引从 0 开始。
         # 如果你有 2 个账号，写 [0, 1]
-        # 如果你有 3 个账号，写 [0, 1, 2]
         account_index: [0, 1]
 
     steps:
@@ -43,32 +44,23 @@ jobs:
           pip install -r requirements.txt
           python -m playwright install chromium
 
-      - name: 🎲 随机延迟 (避免完全并发)
+      - name: 🎲 随机延迟
         run: |
-          # 虽然IP不同了，稍微错开几秒还是好的
           delay=$((RANDOM % 60))
           echo "Random delay: ${delay}s"
           sleep $delay
 
       - name: 运行脚本
         env:
-          # 传入所有账号配置
           XSERVER_BATCH: ${{ secrets.XSERVER_BATCH }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           PROXY_SERVER: ${{ secrets.PROXY_SERVER }}
           USE_HEADLESS: "true"
-          
-          # 👇👇👇 【核心修改 2】把当前任务的编号传给 Python 👇👇👇
-          # 这样 Python 脚本就知道："我是分身0，我只跑第1个账号"
           TARGET_INDEX: ${{ matrix.account_index }}
           
-        # ⚠️ 确保你的 Python 文件名是 main.py (对应上一条回复的代码)
         run: python main.py
 
-      # 👇👇👇 【核心修改 3】防止 Git 提交冲突 👇👇👇
-      # 因为有多个任务并行运行，如果它们同时提交代码会报错。
-      # 我们限制只有第一个账号 (索引0) 负责更新 time.txt
       - name: Commit time.txt to repo
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -78,7 +70,7 @@ jobs:
             git config user.email "github-actions[bot]@users.noreply.github.com"
 
             if [ ! -f time.txt ]; then
-              echo "首次生成时间：$(date +'%Y-%m-%d %H:%M:%S')" > time.txt
+              echo "Init: $(date +'%Y-%m-%d %H:%M:%S')" > time.txt
             else
               echo "$(date +'%Y-%m-%d %H:%M:%S')" > time.txt
             fi
@@ -86,11 +78,11 @@ jobs:
             git add time.txt
 
             if git diff --cached --quiet; then
-              echo "无变化，无需提交"
+              echo "无变化"
             else
-              git commit -m "⏱️ 更新时间文件: $(date +'%Y-%m-%d %H:%M:%S')"
+              git commit -m "⏱️ 更新时间"
               git push origin HEAD:main
             fi
           else
-            echo "当前是分身任务 ${{ matrix.account_index }}，跳过提交步骤，防止冲突。"
+            echo "跳过提交"
           fi

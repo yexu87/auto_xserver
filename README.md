@@ -3,14 +3,19 @@
 
 ## 1、你需要在仓库 Settings → Secrets and variables → Actions → Secrets 里新增：
 
-XSERVER_EMAIL
+XServer GAME 多账号自动登录和续期脚本
+填写示例 (XSERVER_BATCH)：
 
-XSERVER_PASSWORD
+Plaintext
+# 账号1：使用全局默认TG通知
+xm123456,mypassword1,210.131.111.222
 
-（可选）TELEGRAM_BOT_TOKEN
+# 账号2：使用该账号专属的TG通知
+xm987654,mypassword2,210.131.333.444,123456:AbcDefToken,987654321
 
-（可选）TELEGRAM_CHAT_ID
-
+# 账号3：不发通知（如果全局也没配的话）
+xm555666,mypassword3,111.222.33.44
+"""
 
 ## 2、开放自动写time.txt的文件权限。
 ### 这个主要是用于规避github 默认60天的仓库代码没有任何变动就会自动给你发邮件并且自动禁用action的定时任务。

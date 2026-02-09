@@ -43,8 +43,8 @@ TARGET_URL = "https://secure.xserver.ne.jp/xapanel/login/xmgame/game/"
 EXPECTED_INDEX_URL = "https://secure.xserver.ne.jp/xmgame/game/index"
 
 # Telegram配置
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or "8550805872:AAEiDpg6QlHrQannn9z_HGz7DmcEFlD30tI"
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or "7707990981"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or ""
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") or ""
 
 # =====================================================================
 #                        Telegram 推送模块
@@ -489,4 +489,65 @@ class XServerAutoLogin:
         try:
             print("📝 正在生成报告...")
             # 简单生成文件，主要依赖 Telegram 推送
-            with open("report-notify.md", "w", encoding="utf-8
+            with open("report-notify.md", "w", encoding="utf-8") as f:
+                f.write(f"Status: {self.renewal_status}\nOld: {self.old_expiry_time}\nNew: {self.new_expiry_time}")
+            
+            # 推送
+            self.telegram.send_renewal_result(
+                status=self.renewal_status,
+                old_time=self.old_expiry_time,
+                new_time=self.new_expiry_time
+            )
+        except Exception as e:
+            print(f"❌ 报告生成失败: {e}")
+
+    # =================================================================
+    #                        主流程
+    # =================================================================
+
+    async def run(self):
+        """运行流程"""
+        try:
+            print("🚀 开始自动流程...")
+            if not self.validate_config(): return False
+            if not await self.setup_browser(): return False
+            if not await self.navigate_to_login(): return False
+            if not await self.perform_login(): return False
+            
+            # 登录后逻辑包含在 handle_login_result (验证) -> get_server_time -> renewal 中
+            if not await self.handle_login_result(): 
+                print("⚠️ 登录后验证失败")
+                return False
+            
+            print("🎉 流程执行完毕!")
+            self.generate_report_notify()
+            return True
+            
+        except Exception as e:
+            print(f"❌ 流程异常: {e}")
+            self.generate_report_notify()
+            return False
+        finally:
+            await self.cleanup()
+
+# =====================================================================
+#                          主程序入口
+# =====================================================================
+
+async def main():
+    print("=" * 60)
+    print("XServer GAME 自动登录脚本 (独立面板版)")
+    print("=" * 60)
+    
+    auto_login = XServerAutoLogin()
+    success = await auto_login.run()
+    
+    if success:
+        print("✅ 执行成功")
+        exit(0)
+    else:
+        print("❌ 执行失败")
+        exit(1)
+
+if __name__ == "__main__":
+    asyncio.run(main())
